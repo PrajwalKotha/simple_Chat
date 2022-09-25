@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:file="http://www.mulesoft.org/schema/mule/file"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="4bf087ef-a6da-47d8-acde-fcdab57fc3e0" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<os:object-store name="Chat" doc:name="Object store" doc:id="ee60c08a-4786-4c8d-8c27-d32eac6ad904" expirationInterval="10" />
+	<http:request-config name="HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="3747e00a-b1e0-472e-bd82-30f28ae12e63" >
+		<http:request-connection host="localhost" port="8081" />
+	</http:request-config>
+	<flow name="loginForm" doc:id="f21eb5d2-0f22-44f5-9a3f-75ce7a4971df" >
+		<http:listener doc:name="Listener" doc:id="5a7a36aa-8444-47e2-a142-19a8bef44a3b" config-ref="HTTP_Listener_config" path="/loginForm"/>
+		<parse-template doc:name="Parse Template" doc:id="bc790ee5-70c8-421f-b58b-258a3451a2bd" location="templates/loginForm.template" outputMimeType="text/html"/>
+	</flow>
+	<flow name="getImages" doc:id="0df6b988-d079-4ba4-bcc0-db156e8f216e" >
+		<http:listener doc:name="Listener" doc:id="b5292d19-fac0-479c-b4a9-75194fc487ff" config-ref="HTTP_Listener_config" path="/images/{fileName}"/>
+		<file:read doc:name="Read" doc:id="6ff03cea-0f9f-41d7-ba9d-223c7dc496a8" path="#[p('app.home') ++ &quot;/images/&quot; ++ attributes.uriParams.fileName]"/>
+	</flow>
+	<flow name="mainPage" doc:id="6f503cb2-f1ea-44af-9fc4-9ccc0150400f" >
+		<http:listener doc:name="Listener" doc:id="2f25eacc-a3d5-462e-82b5-7ab0e45b763c" config-ref="HTTP_Listener_config" path="/mainPage"/>
+		<logger level="INFO" doc:name="Logger" doc:id="c282bbdc-fcaf-4060-8f85-e00b516a5539" message="Test #[payload]"/>
+		<set-variable value='#[output application/java
+---
+if(!isEmpty(payload.uname)) payload.uname else attributes.queryParams.uname default " "]' doc:name="Set Variable" doc:id="96fa64f9-2b4b-49f3-8b12-9260b99b9173" variableName="userName"/>
+		<parse-template doc:name="Parse Template" doc:id="5b40012f-93bd-4cf9-ba56-2f89f7013eae" location="templates/main.template" outputMimeType="text/html"/>
+	</flow>
+	<flow name="StoreChat" doc:id="9b820b23-3582-4579-afcd-813c1b2b4b32" >
+		<http:listener doc:name="Listener" doc:id="871eba5b-7430-4772-b2f7-1951511d38b7" config-ref="HTTP_Listener_config" path="/input/{userName}"/>
+		<logger level="INFO" doc:name="Logger" doc:id="4c596f2a-059f-464a-a029-cb84a5695f9c" message='#[payload] #["UserName" ++ attributes.uriParams.userName]'/>
+		<ee:transform doc:name="Transform Message" doc:id="285f67de-9645-4f33-84e4-9cb0c8dcddd9" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<choice doc:name="Choice" doc:id="451764b2-9d0b-4066-baf3-4d783410acfd" >
+			<when expression="#[!isEmpty(payload)]">
+				<os:store doc:name="Store" doc:id="6ba6dbe8-f59f-4f71-97a0-2b7b43e8a201" key="#[attributes.uriParams.userName ++ (now() as String)]" objectStore="Chat">
+			<os:value><![CDATA[#[output application/java --- {
+	"Name" : attributes.uriParams.userName,
+	"message" : payload.msg,
+	"TimeStamp" : now()
+}]]]></os:value>
+		</os:store>
+			</when>
+			<otherwise >
+				<logger level="INFO" doc:name="Logger" doc:id="8694ddeb-f9dc-44b3-9b60-0ba951af68fc" message="empty message so skipped"/>
+			</otherwise>
+		</choice>
+		<http:request method="POST" doc:name="Request" doc:id="8cd1dffa-d4d5-4010-88e7-e31c244fb8c1" path="/mainPage" config-ref="HTTP_Request_configuration">
+			<http:body ><![CDATA[#[output application/x-www-form-urlencoded
+---
+{
+	uname : attributes.uriParams.userName
+}]]]></http:body>
+		</http:request>
+	</flow>
+	<flow name="getAllChats" doc:id="046f2712-d112-46dd-845f-98ff696a2c3c" >
+		<http:listener doc:name="Listener" doc:id="03ba08e1-36b4-4cd2-85a6-2927153ffecd" config-ref="HTTP_Listener_config" path="/getAll"/>
+		<logger level="INFO" doc:name="Logger" doc:id="74217886-8dbb-4666-b295-27baebb6f97d" message="Request To view All Messages"/>
+		<os:retrieve-all doc:name="Retrieve all" doc:id="cc7050c9-8f6d-4cf3-9470-efa84a3f1f90" objectStore="Chat"/>
+		<ee:transform doc:name="Transform Message" doc:id="c833bb18-12e1-4c84-a0dd-f3d8f675686a" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+((((payload pluck $) orderBy (($.TimeStamp as LocalDateTime))) default []) map {
+    Name: $.Name,
+    message: $.message,
+    Date: $.TimeStamp as Date,
+    Time: ($.TimeStamp) as LocalDateTime as String {format: "HH:mm:ss.SS"}
+}) [-1 to 0]]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="clearAllChats" doc:id="6f31bafa-a23f-4628-84fe-332687f130eb" >
+		<http:listener doc:name="Listener" doc:id="a3a4a8b9-99ca-46c1-9a03-67943c9b3f67" config-ref="HTTP_Listener_config" path="/clearAll/{uname}"/>
+		<os:clear doc:name="Clear" doc:id="020271c8-319c-4eec-a19c-ec787d521b00" objectStore="Chat"/>
+		<logger level="INFO" doc:name="Logger" doc:id="ca79b863-e375-4084-a29c-50fa8599dd48" message="Chats Cleared Successfully"/>
+		<http:request method="POST" doc:name="Request" doc:id="18fcc2f8-9a64-4abd-b253-cca9730a0db1" path="/mainPage" config-ref="HTTP_Request_configuration">
+			<http:body ><![CDATA[#[output application/x-www-form-urlencoded
+---
+{
+	uname : attributes.uriParams.uname
+}]]]></http:body>
+		</http:request>
+	</flow>
+</mule>
